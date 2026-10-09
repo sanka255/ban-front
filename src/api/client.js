@@ -1,7 +1,17 @@
 import axios from 'axios';
 
+const rawApiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
+const normalizedApiBaseUrl = rawApiBaseUrl.replace(/\/+$/, '');
+const baseURL = normalizedApiBaseUrl
+  ? normalizedApiBaseUrl.endsWith('/api/banquet')
+    ? normalizedApiBaseUrl
+    : normalizedApiBaseUrl.endsWith('/api')
+      ? `${normalizedApiBaseUrl}/banquet`
+      : `${normalizedApiBaseUrl}/api/banquet`
+  : '/api/banquet';
+
 const client = axios.create({
-  baseURL: '/api/banquet',
+  baseURL,
   headers: { 'Content-Type': 'application/json' },
 });
 
