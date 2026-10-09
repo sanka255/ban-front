@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import axios from 'axios';
 
+const authLoginUrl = import.meta.env.VITE_API_BASE_URL
+  ? `${import.meta.env.VITE_API_BASE_URL.replace(/\/+$/, '')}/api/auth/login`
+  : '/api/auth/login';
+
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -15,7 +19,7 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      const { data } = await axios.post('/api/auth/login', form);
+      const { data } = await axios.post(authLoginUrl, form);
       login(data.token);
       navigate('/hall-setup');
     } catch (err) {
