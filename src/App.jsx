@@ -33,7 +33,6 @@ function Layout() {
   const navItems = [
     { to: '/calendar', label: 'Calendar', always: true },
     { to: '/reservations', label: 'Reservations', always: true },
-    { to: '/currency-config', label: 'Currency Config', admin: true },
     { to: '/hall-setup', label: 'Hall Setup', admin: true },
     { to: '/menus', label: 'Menus', admin: true },
     { to: '/availability-test', label: 'Avail. Test', always: true },
