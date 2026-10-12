@@ -141,6 +141,14 @@ export default function BanquetFolio({ reservationId: propId }) {
     } catch (err) { alert(err.response?.data?.error || 'Failed'); }
   }
 
+  async function deleteDeposit(depositId) {
+    if (!confirm('Are you sure you want to delete this deposit? If no deposits remain, the reservation will revert to tentative.')) return;
+    try {
+      await client.delete(`/deposits/${depositId}`);
+      load();
+    } catch (err) { alert(err.response?.data?.error || 'Failed to delete deposit'); }
+  }
+
   if (loading) return <div className="text-center py-12 text-gray-400 animate-pulse">Loading folio…</div>;
   if (!folio) return <div className="text-center py-12 text-gray-400">Folio not found</div>;
 
@@ -158,7 +166,20 @@ export default function BanquetFolio({ reservationId: propId }) {
       <div className="glass-card rounded-2xl p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Folio — {reservation.reservationCode}</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Folio — {reservation.reservationCode}</h1>
+              {reservation.status && (
+                <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                  reservation.status === 'guaranteed'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : reservation.status === 'tentative'
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                    : 'bg-slate-500/10 border-slate-500/30 text-slate-400'
+                }`}>
+                  {reservation.status}
+                </span>
+              )}
+            </div>
             <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{reservation.guest?.firstName} {reservation.guest?.lastName} · {reservation.numberOfGuests} guests</p>
             {reservation.isComplementary && (
               <span className="mt-3 inline-flex rounded-full border border-purple-500/30 bg-purple-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-purple-300">Complementary</span>
@@ -287,6 +308,7 @@ export default function BanquetFolio({ reservationId: propId }) {
                     ? <span className="text-emerald-400 font-semibold">Settled</span>
                     : <button onClick={() => settleDeposit(d.id)} className="font-medium text-amber-400 hover:text-amber-300">Settle</button>
                   }
+                  <button onClick={() => deleteDeposit(d.id)} title="Delete deposit" className="text-xs text-red-400 hover:text-red-300 px-1 py-0.5 rounded hover:bg-red-500/10">✕</button>
                 </div>
               </div>
             ))}

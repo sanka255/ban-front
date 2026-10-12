@@ -37,7 +37,8 @@ function Section({ title, children }) {
 function AvailabilityBadge({ state }) {
   if (state === 'checking') return <span className="text-xs text-gray-400 animate-pulse">Checking…</span>;
   if (state === 'available') return <span className="text-xs font-semibold text-green-600">✓ Available</span>;
-  if (state === 'conflict') return <span className="text-xs font-semibold text-red-600">✗ Conflict</span>;
+  if (state === 'tentative_overlap') return <span className="text-xs font-semibold text-amber-600">⚠ Tentative overlap (Allowed)</span>;
+  if (state === 'conflict') return <span className="text-xs font-semibold text-red-600">✗ Guaranteed conflict</span>;
   return null;
 }
 
@@ -144,8 +145,14 @@ export default function BanquetReservationForm({ onCreated, onCancel }) {
       const { data } = await client.get(
         `/availability?partitionId=${slot.partitionId}&fromDate=${slot.fromDate}&toDate=${slot.toDate}&fromTime=${slot.fromTime}&toTime=${slot.toTime}`
       );
+      let status = 'available';
+      if (data.hasGuaranteedConflict) {
+        status = 'conflict';
+      } else if (data.hasTentativeConflict) {
+        status = 'tentative_overlap';
+      }
       setSlots((prev) => {
-        const next = [...prev]; next[idx] = { ...next[idx], availability: data.available ? 'available' : 'conflict' }; return next;
+        const next = [...prev]; next[idx] = { ...next[idx], availability: status }; return next;
       });
     } catch {
       setSlots((prev) => {
