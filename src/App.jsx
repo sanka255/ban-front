@@ -15,6 +15,7 @@ import BanquetReports from './pages/BanquetReports';
 import AccountMapping from './pages/AccountMapping';
 import GLLedger from './pages/GLLedger';
 import CurrencyConfig from './pages/CurrencyConfig';
+import ExtraChargeMaster from './pages/ExtraChargeMaster';
 
 function RequireAuth({ children }) {
   const { token } = useAuth();
@@ -35,6 +36,7 @@ function Layout() {
     { to: '/reservations', label: 'Reservations', always: true },
     { to: '/hall-setup', label: 'Hall Setup', admin: true },
     { to: '/menus', label: 'Menus', admin: true },
+    { to: '/extra-charge-master', label: 'Excharges', admin: true },
     { to: '/availability-test', label: 'Avail. Test', always: true },
   ].filter(i => i.always || (i.admin && isAdmin));
 
@@ -139,6 +141,7 @@ export default function App() {
             <Route path="/account-mapping" element={<RequireAdmin><AccountMapping /></RequireAdmin>} />
             <Route path="/hall-setup" element={<RequireAdmin><HallSetup /></RequireAdmin>} />
             <Route path="/menus" element={<RequireAdmin><MenuBuilder /></RequireAdmin>} />
+            <Route path="/extra-charge-master" element={<RequireAdmin><ExtraChargeMaster /></RequireAdmin>} />
             <Route path="/availability-test" element={<AvailabilityTest />} />
             <Route path="*" element={<Navigate to="/calendar" replace />} />
           </Route>

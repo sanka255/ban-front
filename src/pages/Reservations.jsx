@@ -90,73 +90,75 @@ export default function Reservations({ onNew }) {
 
       {/* Table */}
       <div className="glass-card rounded-2xl overflow-hidden">
-        <table className="reservation-table">
-          <thead>
-            <tr>
-              <th>Code</th>
-              <th>Guest</th>
-              <th>PAX</th>
-              <th>Status</th>
-              <th>Next Slot</th>
-              <th>Complementary</th>
-              <th className="text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (
-              <tr><td colSpan={7} className="py-10 text-center animate-pulse" style={{ color: 'var(--text-muted)' }}>Loading…</td></tr>
-            )}
-            {!loading && data.reservations.length === 0 && (
-              <tr><td colSpan={7} className="py-10 text-center" style={{ color: 'var(--text-muted)' }}>No reservations found</td></tr>
-            )}
-            {data.reservations.map((r) => {
-              const nextSlot = r.dateSlots?.[0];
-              return (
-                <tr key={r.id}>
-                  <td className="font-mono font-medium">
-                    <Link to={`/reservations/${r.id}`} className="reservation-link-code">{r.reservationCode}</Link>
-                  </td>
-                  <td style={{ color: 'var(--text-primary)' }}>{r.guest?.firstName} {r.guest?.lastName}</td>
-                  <td style={{ color: 'var(--text-secondary)' }}>{r.numberOfGuests}</td>
-                  <td>
-                    <span className={`reservation-badge ${STATUS_COLORS[r.status] ?? 'bg-gray-100 text-gray-600'}`}>
-                      {r.status}
-                    </span>
-                  </td>
-                  <td className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    {nextSlot ? `${nextSlot.fromDate?.toString().slice(0,10)} ${nextSlot.fromTime?.toString().slice(11,16)}` : '—'}
-                  </td>
-                  <td>
-                    {r.isComplementary && <span className="reservation-flag">Comp</span>}
-                  </td>
-                  <td className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <Link to={`/reservations/${r.id}`} className="reservation-action-link">View</Link>
-                      <Link to={`/reservations/${r.id}/folio`} className="reservation-action-link">Folio</Link>
-                      {r.status !== 'cancelled' && (
-                        <button
-                          onClick={async () => {
-                            if (!confirm('Cancel entire reservation?')) return;
-                            try {
-                              await client.post(`/reservations/${r.id}/cancel`, {});
-                              setActionMsg(`Reservation ${r.reservationCode} cancelled.`);
-                              load();
-                            } catch (err) {
-                              alert(err.response?.data?.error || 'Cancel failed');
-                            }
-                          }}
-                          className="reservation-action-btn cancel"
-                        >
-                          Cancel
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="reservation-table-wrap">
+          <table className="reservation-table">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Guest</th>
+                <th>PAX</th>
+                <th>Status</th>
+                <th>Next Slot</th>
+                <th>Complementary</th>
+                <th className="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading && (
+                <tr><td colSpan={7} className="py-10 text-center animate-pulse" style={{ color: 'var(--text-muted)' }}>Loading…</td></tr>
+              )}
+              {!loading && data.reservations.length === 0 && (
+                <tr><td colSpan={7} className="py-10 text-center" style={{ color: 'var(--text-muted)' }}>No reservations found</td></tr>
+              )}
+              {data.reservations.map((r) => {
+                const nextSlot = r.dateSlots?.[0];
+                return (
+                  <tr key={r.id}>
+                    <td className="font-mono font-medium">
+                      <Link to={`/reservations/${r.id}`} className="reservation-link-code">{r.reservationCode}</Link>
+                    </td>
+                    <td style={{ color: 'var(--text-primary)' }}>{r.guest?.firstName} {r.guest?.lastName}</td>
+                    <td style={{ color: 'var(--text-secondary)' }}>{r.numberOfGuests}</td>
+                    <td>
+                      <span className={`reservation-badge ${STATUS_COLORS[r.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                        {r.status}
+                      </span>
+                    </td>
+                    <td className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                      {nextSlot ? `${nextSlot.fromDate?.toString().slice(0,10)} ${nextSlot.fromTime?.toString().slice(11,16)}` : '—'}
+                    </td>
+                    <td>
+                      {r.isComplementary && <span className="reservation-flag">Comp</span>}
+                    </td>
+                    <td className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Link to={`/reservations/${r.id}`} className="reservation-action-link">View</Link>
+                        <Link to={`/reservations/${r.id}/folio`} className="reservation-action-link">Folio</Link>
+                        {r.status !== 'cancelled' && (
+                          <button
+                            onClick={async () => {
+                              if (!confirm('Cancel entire reservation?')) return;
+                              try {
+                                await client.post(`/reservations/${r.id}/cancel`, {});
+                                setActionMsg(`Reservation ${r.reservationCode} cancelled.`);
+                                load();
+                              } catch (err) {
+                                alert(err.response?.data?.error || 'Cancel failed');
+                              }
+                            }}
+                            className="reservation-action-btn cancel"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Pagination */}

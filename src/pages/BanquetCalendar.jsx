@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import moment from 'moment';
 import client from '../api/client';
 import CancellationDialog from '../components/CancellationDialog';
 
@@ -27,6 +28,26 @@ function dayLabel(d) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 }
 
+function formatSlotDate(value) {
+  if (!value) return '';
+  return moment.utc(value).format('YYYY-MM-DD');
+}
+
+function formatSlotTime(value) {
+  if (!value) return '';
+  return moment.utc(value).format('HH:mm');
+}
+
+function formatPostponeSummary(newSlot, fallback) {
+  const fromDate = formatSlotDate(newSlot?.fromDate || fallback?.fromDate);
+  const toDate = formatSlotDate(newSlot?.toDate || fallback?.toDate);
+  const fromTime = formatSlotTime(newSlot?.fromTime || fallback?.fromTime);
+  const toTime = formatSlotTime(newSlot?.toTime || fallback?.toTime);
+
+  if (!fromDate && !toDate && !fromTime && !toTime) return '';
+  return `${fromDate || '—'} → ${toDate || '—'} @ ${fromTime || '—'}–${toTime || '—'}`;
+}
+
 // ─── BanquetCalendar (Tape Chart) ─────────────────────────────────────────────
 
 export default function BanquetCalendar() {
@@ -39,8 +60,19 @@ export default function BanquetCalendar() {
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [showPostpone, setShowPostpone] = useState(false);
   const [postponeForm, setPostponeForm] = useState({ fromDate: '', toDate: '', fromTime: '', toTime: '' });
+  const [postponeHallId, setPostponeHallId] = useState('');
+  const [postponePartitionId, setPostponePartitionId] = useState('');
+  const [hallOptions, setHallOptions] = useState([]);
+  const [partitionOptions, setPartitionOptions] = useState([]);
   const [postponeError, setPostponeError] = useState('');
   const [actionMsg, setActionMsg] = useState('');
+  const [postponedRemark, setPostponedRemark] = useState('');
+  const [slotMenuDetail, setSlotMenuDetail] = useState(null);
+  const [menuOptions, setMenuOptions] = useState([]);
+  const [selectedMenuId, setSelectedMenuId] = useState('');
+  const [menuGuestCount, setMenuGuestCount] = useState(1);
+  const [menuError, setMenuError] = useState('');
+  const [menuSubmitting, setMenuSubmitting] = useState(false);
 
   // Compute the 7 dates for the current week
   const today = new Date();
@@ -67,9 +99,90 @@ export default function BanquetCalendar() {
 
   useEffect(() => { loadCalendar(); }, [loadCalendar]);
 
+  const loadSlotMenuDetail = useCallback(async (slotId) => {
+    if (!slotId) {
+      setSlotMenuDetail(null);
+      setMenuOptions([]);
+      setSelectedMenuId('');
+      setMenuError('');
+      return;
+    }
+
+    try {
+      const { data: detail } = await client.get(`/date-slots/${slotId}`);
+      setSlotMenuDetail(detail);
+      setMenuError('');
+
+      const rawDate = detail?.slot?.fromDate || selectedSlot?.fromDate;
+      const eventDate = rawDate ? rawDate.split('T')[0] : null;
+      if (eventDate) {
+        const { data: menus } = await client.get('/menus', { params: { availableOn: eventDate } });
+        const actionableMenus = (menus || []).filter((menu) => menu?.rate != null);
+        setMenuOptions(actionableMenus);
+        setSelectedMenuId(actionableMenus.length > 0 ? String(actionableMenus[0].id) : '');
+      } else {
+        setMenuOptions([]);
+        setSelectedMenuId('');
+      }
+    } catch (err) {
+      console.error('Failed to load selected slot menu detail', err);
+      setSlotMenuDetail(null);
+      setMenuOptions([]);
+      setSelectedMenuId('');
+      setMenuError('');
+    }
+  }, [selectedSlot?.fromDate]);
+
+  useEffect(() => {
+    if (!selectedSlot?.id) {
+      setSlotMenuDetail(null);
+      setMenuOptions([]);
+      setSelectedMenuId('');
+      setMenuGuestCount(1);
+      setMenuError('');
+      return;
+    }
+
+    const defaultGuestCount = Number(selectedSlot.numberOfGuests || 1);
+    setSelectedMenuId('');
+    setMenuGuestCount(defaultGuestCount);
+    setMenuError('');
+    loadSlotMenuDetail(selectedSlot.id);
+  }, [selectedSlot?.id, selectedSlot?.numberOfGuests, loadSlotMenuDetail]);
+
   // Find which slot (if any) occupies a given partition on a given date
   function getSlotForCell(partitionSlots, dateStr) {
-    return partitionSlots.find((s) => s.fromDate <= dateStr && s.toDate >= dateStr) ?? null;
+    const matches = partitionSlots.filter((s) => s.fromDate <= dateStr && s.toDate >= dateStr);
+    if (matches.length === 0) return [];
+
+    const grouped = new Map();
+    for (const slot of matches) {
+      const key = slot.reservationId ?? `${slot.id}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, []);
+      }
+      grouped.get(key).push(slot);
+    }
+
+    const merged = [];
+    for (const group of grouped.values()) {
+      group.sort((a, b) => {
+        const dateOrder = (a.fromDate || '').localeCompare(b.fromDate || '');
+        if (dateOrder !== 0) return dateOrder;
+        if (a.status === 'postponed' && b.status !== 'postponed') return -1;
+        if (a.status !== 'postponed' && b.status === 'postponed') return 1;
+        return 0;
+      });
+      merged.push(...group);
+    }
+
+    return merged.sort((a, b) => {
+      const dateOrder = (a.fromDate || '').localeCompare(b.fromDate || '');
+      if (dateOrder !== 0) return dateOrder;
+      if (a.status === 'postponed' && b.status !== 'postponed') return -1;
+      if (a.status !== 'postponed' && b.status === 'postponed') return 1;
+      return (a.id ?? 0) - (b.id ?? 0);
+    });
   }
 
   // Is this the first day of the slot's span that falls in the visible week?
@@ -83,8 +196,17 @@ export default function BanquetCalendar() {
   async function handlePostpone() {
     setPostponeError('');
     try {
-      await client.post(`/date-slots/${selectedSlot.id}/postpone`, postponeForm);
-      setActionMsg('Slot postponed successfully.');
+      const payload = {
+        ...postponeForm,
+        hallId: postponeHallId ? Number(postponeHallId) : undefined,
+        partitionId: postponePartitionId ? Number(postponePartitionId) : undefined,
+      };
+      const { data } = await client.post(`/date-slots/${selectedSlot.id}/postpone`, payload);
+      const newDateSummary = formatPostponeSummary(data?.newSlot, postponeForm);
+      const nextRemark = `This slot was postponed and preserved as historical data. New active slot: ${newDateSummary || 'updated date/time'}.`;
+
+      setActionMsg('Slot postponed successfully. Original slot marked as postponed.');
+      setPostponedRemark(nextRemark);
       setShowPostpone(false);
       setSelectedSlot(null);
       loadCalendar();
@@ -92,6 +214,72 @@ export default function BanquetCalendar() {
       setPostponeError(err.response?.data?.error || 'Postpone failed');
     }
   }
+
+  async function handleAddMenu() {
+    if (!selectedSlot?.id || !selectedMenuId) {
+      setMenuError('Select a menu before saving.');
+      return;
+    }
+
+    setMenuSubmitting(true);
+    setMenuError('');
+
+    try {
+      await client.post(`/date-slots/${selectedSlot.id}/requested-menus`, {
+        menuId: Number(selectedMenuId),
+        guestCount: Number(menuGuestCount || 1),
+      });
+
+      await loadSlotMenuDetail(selectedSlot.id);
+      setActionMsg('Menu added to the reservation.');
+      setMenuGuestCount(Number(selectedSlot.numberOfGuests || 1));
+    } catch (err) {
+      setMenuError(err.response?.data?.error || 'Unable to attach menu.');
+    } finally {
+      setMenuSubmitting(false);
+    }
+  }
+
+  async function handleRemoveMenu(menuId) {
+    const row = (slotMenuDetail?.requestedMenus || []).find((item) => Number(item.menuId) === Number(menuId));
+    if (!row) return;
+
+    try {
+      await client.delete(`/date-slots/${selectedSlot.id}/requested-menus/${row.id}`);
+      await loadSlotMenuDetail(selectedSlot.id);
+      setActionMsg('Menu removed from the reservation.');
+    } catch (err) {
+      setMenuError(err.response?.data?.error || 'Unable to remove menu.');
+    }
+  }
+
+  useEffect(() => {
+    if (!showPostpone || !selectedSlot) return;
+
+    (async () => {
+      try {
+        const { data: halls } = await client.get('/halls');
+        setHallOptions(halls);
+
+        const currentHallId = selectedSlot.hallId || halls[0]?.id || '';
+        setPostponeHallId(String(currentHallId));
+
+        if (currentHallId) {
+          const { data: partitions } = await client.get(`/halls/${currentHallId}/partitions`);
+          setPartitionOptions(partitions);
+          const currentPartitionId = selectedSlot.partitionId || partitions[0]?.id || '';
+          setPostponePartitionId(String(currentPartitionId));
+        } else {
+          setPartitionOptions([]);
+          setPostponePartitionId('');
+        }
+      } catch (err) {
+        console.error(err);
+        setHallOptions([]);
+        setPartitionOptions([]);
+      }
+    })();
+  }, [showPostpone, selectedSlot]);
 
   return (
     <div className="space-y-4">
@@ -169,9 +357,9 @@ export default function BanquetCalendar() {
                       {/* Date cells */}
                       {dates.map((d) => {
                         const dateStr = fmtDate(d);
-                        const slot = getSlotForCell(partition.slots, dateStr);
+                        const slots = getSlotForCell(partition.slots, dateStr);
 
-                        if (!slot) {
+                        if (slots.length === 0) {
                           return (
                             <td key={dateStr} className="border-r border-gray-100 py-1.5 px-1 text-center text-gray-200">
                               —
@@ -179,9 +367,49 @@ export default function BanquetCalendar() {
                           );
                         }
 
-                        const styleCls = RES_STATUS_STYLE[slot.reservationStatus] || 'bg-gray-100 text-gray-600';
-                        const start = isSlotStart(slot, dateStr);
-                        const end   = isSlotEnd(slot, dateStr);
+                        const primarySlot = slots.find((s) => s.status === 'active') || slots[0];
+                        const start = isSlotStart(primarySlot, dateStr);
+                        const end   = isSlotEnd(primarySlot, dateStr);
+
+                        if (slots.length > 1) {
+                          return (
+                            <td
+                              key={dateStr}
+                              className={`border-r border-gray-100 py-1 px-0.5 cursor-pointer ${
+                                start ? 'rounded-l-md pl-1.5' : ''
+                              } ${end ? 'rounded-r-md pr-1.5' : ''}`}
+                              onClick={() => setSelectedSlot(primarySlot)}
+                            >
+                              <div className="flex items-stretch gap-[2px] h-full">
+                                {slots.map((slot, idx) => {
+                                  const slotStatus = slot.status !== 'active' ? slot.status : slot.reservationStatus;
+                                  const styleCls = RES_STATUS_STYLE[slotStatus] || 'bg-gray-100 text-gray-600';
+                                  const isOld = slot.status === 'postponed';
+
+                                  return (
+                                    <div
+                                      key={`${slot.id}-${idx}`}
+                                      className={`${isOld ? 'w-1/4' : 'w-3/4'} min-w-0 rounded-sm border border-white/50 ${styleCls} px-1 py-0.5 text-center`}
+                                      title={`${slot.reservationCode} — ${slot.guestName} — ${slot.fromTime}–${slot.toTime}`}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedSlot(slot);
+                                      }}
+                                    >
+                                      <div className="truncate font-semibold leading-tight">{slot.reservationCode}</div>
+                                      <div className="truncate text-[8px] opacity-80">{moment.utc(slot.fromDate).format('D MMM')}</div>
+                                      <div className="truncate text-[7px] opacity-75 uppercase">{isOld ? 'old' : 'new'}</div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </td>
+                          );
+                        }
+
+                        const slot = slots[0];
+                        const slotStatus = slot.status !== 'active' ? slot.status : slot.reservationStatus;
+                        const styleCls = RES_STATUS_STYLE[slotStatus] || 'bg-gray-100 text-gray-600';
 
                         return (
                           <td
@@ -221,6 +449,7 @@ export default function BanquetCalendar() {
           <div className="space-y-1 text-sm text-gray-700 mb-4">
             <p><span className="font-medium">Guest:</span> {selectedSlot.guestName}</p>
             <p><span className="font-medium">PAX:</span> {selectedSlot.numberOfGuests}</p>
+            <p><span className="font-medium">Hall:</span> {selectedSlot.hallName || 'Current hall'} / {selectedSlot.partitionName || 'Current partition'}</p>
             <p><span className="font-medium">Dates:</span> {selectedSlot.fromDate} → {selectedSlot.toDate}</p>
             <p><span className="font-medium">Time:</span> {selectedSlot.fromTime} – {selectedSlot.toTime}</p>
             <p><span className="font-medium">Charge:</span> {Number(selectedSlot.charge).toLocaleString()}</p>
@@ -230,10 +459,96 @@ export default function BanquetCalendar() {
                 {selectedSlot.reservationStatus}
               </span>
             </p>
+            {selectedSlot.status === 'postponed' && (
+              <p className="rounded-md border border-purple-200 bg-purple-50 px-2 py-1 text-xs text-purple-800">
+                <span className="font-semibold">Remark:</span> {postponedRemark || 'This slot was postponed and preserved as historical data. A new active slot was created.'}
+              </p>
+            )}
           </div>
 
+          {selectedSlot.status !== 'postponed' && (
+            <div className="border-t border-gray-200 pt-4 mb-4">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-semibold text-gray-800">Menus</h4>
+                <span className="text-[10px] uppercase tracking-wide text-gray-400">{slotMenuDetail?.requestedMenus?.length || 0} attached</span>
+              </div>
+
+              <div className="space-y-2">
+                {(slotMenuDetail?.requestedMenus || []).length === 0 ? (
+                  <p className="text-xs text-gray-500">No menu attached yet.</p>
+                ) : (
+                  (slotMenuDetail?.requestedMenus || []).map((menuRow) => (
+                    <div key={menuRow.id} className="rounded-lg border border-gray-200 bg-gray-50 p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-medium text-gray-800">{menuRow.menu?.name || 'Menu'}</div>
+                          <div className="text-[11px] text-gray-500">{menuRow.guestCount} guests • LKR {Number(menuRow.charge || 0).toLocaleString()}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveMenu(menuRow.menuId)}
+                          className="text-xs text-red-600 hover:text-red-700"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="mt-3 space-y-2 rounded-lg border border-gray-200 p-3 bg-white">
+                <label className="block">
+                  <span className="text-[11px] font-medium text-gray-600 mb-1 block">Select menu</span>
+                  <select
+                    value={selectedMenuId}
+                    onChange={(e) => setSelectedMenuId(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm"
+                    disabled={menuOptions.length === 0}
+                  >
+                    {menuOptions.length === 0 ? <option value="">No menu available for this date</option> : <option value="">Choose a menu</option>}
+                    {menuOptions.map((menu) => (
+                      <option key={menu.id} value={menu.id}>{menu.name} • LKR {Number(menu.rate).toLocaleString()}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="text-[11px] font-medium text-gray-600 mb-1 block">Guest count</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={menuGuestCount}
+                    onChange={(e) => setMenuGuestCount(e.target.value)}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm"
+                  />
+                </label>
+
+                {menuError && <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1">{menuError}</p>}
+
+                <button
+                  type="button"
+                  onClick={handleAddMenu}
+                  disabled={menuSubmitting || menuOptions.length === 0 || !selectedMenuId}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg py-2 text-sm font-medium"
+                >
+                  {menuSubmitting ? 'Saving...' : 'Add Menu'}
+                </button>
+              </div>
+
+              {slotMenuDetail?.subtotal && (
+                <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 p-2 text-xs text-indigo-800">
+                  <div className="flex justify-between"><span>Hall</span><span>LKR {Number(slotMenuDetail.subtotal.hallCharge || 0).toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span>Menus</span><span>LKR {Number(slotMenuDetail.subtotal.menusTotal || 0).toLocaleString()}</span></div>
+                  <div className="flex justify-between"><span>Items</span><span>LKR {Number(slotMenuDetail.subtotal.itemsTotal || 0).toLocaleString()}</span></div>
+                  <div className="mt-1 flex justify-between font-semibold"><span>Total</span><span>LKR {Number(slotMenuDetail.subtotal.grandTotal || 0).toLocaleString()}</span></div>
+                </div>
+              )}
+            </div>
+          )}
+
           {selectedSlot.status === 'active' && (
-            <div className="space-y-2">
+            <div className="space-y-2 pt-4 border-t border-gray-200">
               <button
                 onClick={() => { setShowCancelDialog(true); }}
                 className="w-full bg-red-500 hover:bg-red-600 text-white rounded-lg py-2 text-sm font-medium"
@@ -243,6 +558,8 @@ export default function BanquetCalendar() {
               <button
                 onClick={() => {
                   setPostponeForm({ fromDate: selectedSlot.fromDate, toDate: selectedSlot.toDate, fromTime: selectedSlot.fromTime, toTime: selectedSlot.toTime });
+                  setPostponeHallId(String(selectedSlot.hallId || ''));
+                  setPostponePartitionId(String(selectedSlot.partitionId || ''));
                   setShowPostpone(true);
                 }}
                 className="w-full bg-purple-100 hover:bg-purple-200 text-purple-800 rounded-lg py-2 text-sm font-medium"
@@ -278,9 +595,50 @@ export default function BanquetCalendar() {
             <h3 className="font-bold text-gray-800">Postpone Slot</h3>
             <button onClick={() => setShowPostpone(false)} className="text-gray-400 hover:text-gray-600">✕</button>
           </div>
-          <p className="text-xs text-gray-500">The original slot will be marked <strong>postponed</strong>. A new active slot will be created.</p>
+          <p className="text-xs text-gray-500">The original slot will be marked <strong>postponed</strong>. A new active slot will be created in the currently selected hall: <strong>{selectedSlot.hallName || 'Current hall'}</strong> / <strong>{selectedSlot.partitionName || 'Current partition'}</strong>.</p>
 
           <div className="space-y-2">
+            <label className="block">
+              <span className="text-xs font-medium text-gray-600 mb-1 block">Hall</span>
+              <select
+                value={postponeHallId}
+                onChange={async (e) => {
+                  const hallId = e.target.value;
+                  setPostponeHallId(hallId);
+                  setPostponePartitionId('');
+                  if (!hallId) {
+                    setPartitionOptions([]);
+                    return;
+                  }
+                  const { data } = await client.get(`/halls/${hallId}/partitions`);
+                  setPartitionOptions(data);
+                  setPostponePartitionId(String(data[0]?.id || ''));
+                }}
+                className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm"
+              >
+                <option value="">Select hall</option>
+                {hallOptions.map((hall) => (
+                  <option key={hall.id} value={hall.id}>{hall.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="text-xs font-medium text-gray-600 mb-1 block">Partition</span>
+              <select
+                value={postponePartitionId}
+                onChange={(e) => setPostponePartitionId(e.target.value)}
+                className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm"
+                disabled={!postponeHallId || partitionOptions.length === 0}
+              >
+                {!postponeHallId && <option value="">Select hall first</option>}
+                {partitionOptions.length === 0 && postponeHallId ? <option value="">No partitions</option> : null}
+                {partitionOptions.map((partition) => (
+                  <option key={partition.id} value={partition.id}>{partition.name}</option>
+                ))}
+              </select>
+            </label>
+
             {['fromDate', 'toDate', 'fromTime', 'toTime'].map((field) => (
               <label key={field} className="block">
                 <span className="text-xs font-medium text-gray-600 capitalize mb-1 block">{field.replace(/([A-Z])/g, ' $1')}</span>
